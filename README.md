@@ -23,9 +23,14 @@ Jarvis Gateway is intended to bind to `127.0.0.1` by default. Do not expose it p
 
 ## Quick start
 
-```powershell
-cd C:\Users\Administrator\Documents\GitHub\jarvis-gateway
-.\scripts\run-gateway.ps1
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+python3 -m pip install -r requirements.txt
+./scripts/run-gateway.sh
 ```
+
+The PowerShell launcher remains available for Windows. Both launchers bind the
+service to `127.0.0.1`; Ollama is optional until an Ollama endpoint is used.
 
 Then open <http://127.0.0.1:8765/health>.
