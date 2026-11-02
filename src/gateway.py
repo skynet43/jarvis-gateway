@@ -7,11 +7,15 @@ publicly unless that is an intentional, reviewed change.
 from __future__ import annotations
 
 from typing import Any
+from pathlib import Path
+from contextlib import asynccontextmanager
+from fastapi.responses import FileResponse
 
 import requests
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
+from control import router as control_router
 
 HOST = "127.0.0.1"
 PORT = 8765
@@ -19,11 +23,28 @@ OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 DEFAULT_MODEL = "qwen2.5-coder:7b"
 REQUEST_TIMEOUT_SECONDS = 120
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    from worker import start
+    stop = start()
+    try:
+        yield
+    finally:
+        stop.set()
+
 app = FastAPI(
+    lifespan=lifespan,
     title="Jarvis Gateway",
     description="Local AI control layer for CodexOS.",
     version="0.1.0",
 )
+
+
+app.include_router(control_router)
+
+@app.get('/dashboard', include_in_schema=False)
+def dashboard():
+    return FileResponse(Path(__file__).with_name('dashboard.html'))
 
 
 class ChatMessage(BaseModel):

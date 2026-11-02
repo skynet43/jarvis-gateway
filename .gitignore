@@ -7,3 +7,12 @@ logs/
 *.log
 .DS_Store
 Thumbs.db
+data/
+*.db
+*.db-wal
+*.db-shm
+.pytest_cache/
+playwright-report/
+test-results/
+node_modules/
+dist/

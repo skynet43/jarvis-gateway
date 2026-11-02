@@ -1,7 +1,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$RepoRoot = "C:\Users\Administrator\Documents\GitHub\jarvis-gateway"
+$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 Set-Location -LiteralPath $RepoRoot
 
 if (-not (Test-Path -LiteralPath ".venv")) {
@@ -9,5 +9,5 @@ if (-not (Test-Path -LiteralPath ".venv")) {
 }
 
 . .\.venv\Scripts\Activate.ps1
-pip install fastapi uvicorn requests pydantic
+python -m pip install -r requirements.txt
 python .\src\gateway.py
