@@ -43,6 +43,9 @@ class HardeningTests(unittest.TestCase):
   with patch.dict(os.environ,{'JARVIS_HTTPS_ORIGIN':'https://laptop.test.ts.net'}):
    self.assertEqual(self.c.get('/control/jobs',headers={**self.h,'Host':'laptop.test.ts.net','Origin':'https://laptop.test.ts.net'}).status_code,200)
  def test_private_tailscale_browser_session_requires_owner_identity(self):
+  with TestClient(gateway.app,base_url='http://127.0.0.1',client=('127.0.0.1',12345)) as local:
+   self.assertEqual(local.post('/control/browser-session').status_code,401)
+   self.assertEqual(local.post('/control/browser-session',headers=self.h).status_code,200)
   with patch.dict(os.environ,{'JARVIS_HTTPS_ORIGIN':'https://laptop.test.ts.net','JARVIS_TAILSCALE_LOGIN':'owner@example.test'}):
    with TestClient(gateway.app,base_url='http://laptop.test.ts.net',client=('100.71.85.13',12345)) as remote:
     self.assertEqual(remote.post('/control/browser-session').status_code,403)

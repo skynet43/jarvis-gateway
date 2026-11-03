@@ -94,6 +94,15 @@ class BrowserTools:
     def close_session(self, session_id):
         return self._call("close_session", {"session_id": session_id})
 
+    def abort(self):
+        if self.process.poll() is None:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait(timeout=2)
+
     def close(self):
         if self.process.poll() is None:
             try:

@@ -1,6 +1,11 @@
 import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 const headers = { "X-Jarvis-Token": process.env.JARVIS_ACCEPTANCE_TOKEN! };
+test.beforeEach(async ({ page }) => {
+  page.on("dialog", (dialog) =>
+    dialog.accept(process.env.JARVIS_ACCEPTANCE_TOKEN || ""),
+  );
+});
 async function login(page: Page) {
   await page.addInitScript(() =>
     localStorage.setItem("jarvis-tour-done", "true"),
@@ -26,12 +31,13 @@ test("focused guided tour", async ({ page }) => {
   await page.getByRole("button", { name: "Replay tour" }).click();
   await expect(dialog).toBeVisible();
 });
-test("expired browser session renews without a token prompt", async ({ page }) => {
+test("expired browser cookie falls back to the in-memory admin token", async ({ page }) => {
   await login(page);
-  await page.context().addCookies([{name:"jarvis_browser_session",value:"expired.invalid",url:"http://127.0.0.1:8766",httpOnly:true,sameSite:"Strict"}]);
+  const testPort = process.env.JARVIS_BROWSER_TEST_PORT || "8766";
+  await page.context().addCookies([{name:"jarvis_browser_session",value:"expired.invalid",url:"http://127.0.0.1:"+testPort,httpOnly:true,sameSite:"Strict"}]);
   await page.getByRole("button",{name:"Refresh",exact:true}).click();
-  await expect.poll(async()=> (await page.context().cookies()).find((c)=>c.name==="jarvis_browser_session")?.value).not.toBe("expired.invalid");
   await expect(page.getByText("Workspace ready",{exact:true})).toBeVisible();
+  await expect.poll(async()=> (await page.context().cookies()).find((c)=>c.name==="jarvis_browser_session")?.value).toBe("expired.invalid");
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
 test("auth, screens, accessibility and mobile layout", async ({ page }) => {

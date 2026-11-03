@@ -12,11 +12,12 @@ from adapter.windows_tools import WindowsTools
 
 
 class StartupSecretMiddleware:
-    def __init__(self, app, secret):
+    def __init__(self, app, secret, emergency_stop=None):
         if len(secret) < 32:
             raise ValueError("Automation startup secret must be at least 32 characters")
         self.app = app
         self.expected = ("Bearer " + secret).encode()
+        self.emergency_stop = emergency_stop
 
     async def __call__(self, scope, receive, send):
         if scope["type"] == "http":
@@ -28,6 +29,15 @@ class StartupSecretMiddleware:
                     "headers": [(b"content-type", b"application/json")],
                 })
                 await send({"type": "http.response.body", "body": b'{"detail":"Unauthorized"}'})
+                return
+            if scope.get("method") == "POST" and scope.get("path") == "/emergency-stop":
+                if self.emergency_stop:
+                    self.emergency_stop()
+                await send({
+                    "type": "http.response.start", "status": 200,
+                    "headers": [(b"content-type", b"application/json")],
+                })
+                await send({"type": "http.response.body", "body": b'{"stopped":true}'})
                 return
         await self.app(scope, receive, send)
 
@@ -83,8 +93,13 @@ def build_app(tools, secret, browser=None):
         def browser_screenshot(session_id: str):
             return browser.screenshot(session_id)
 
+    def emergency_stop():
+        tools.close()
+        if browser:
+            browser.abort()
+
     return StartupSecretMiddleware(
-        server.streamable_http_app(stateless_http=True), secret
+        server.streamable_http_app(stateless_http=True), secret, emergency_stop
     )
 
 

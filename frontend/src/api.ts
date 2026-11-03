@@ -79,9 +79,12 @@ export interface Telemetry {
   scope?: string;
 }
 let renewal: Promise<void> | null = null;
-async function renewSession() {
+async function renewSession(token: string) {
   if (!renewal) {
-    renewal = fetch("/control/browser-session", { method: "POST" })
+    renewal = fetch("/control/browser-session", {
+      method: "POST",
+      headers: {"X-Jarvis-Token": token},
+    })
       .then((r) => { if (!r.ok) throw Error("Workspace session could not be renewed"); })
       .finally(() => { renewal = null; });
   }
@@ -90,7 +93,10 @@ async function renewSession() {
 async function authorizedFetch(url: string, init: RequestInit) {
   let response = await fetch(url, init);
   if (response.status === 401) {
-    await renewSession();
+    const headers = new Headers(init.headers);
+    const token = headers.get("X-Jarvis-Token") || "";
+    if (!token || token === "private-owner-session") return response;
+    await renewSession(token);
     response = await fetch(url, init);
   }
   return response;
@@ -115,6 +121,33 @@ export async function api<T>(
         typeof data.detail === "string"
           ? data.detail
           : "Please check your input";
+    } catch {
+      /* use safe fallback */
+    }
+    throw Error(r.status + ": " + detail);
+  }
+  return r.json() as Promise<T>;
+}
+export async function approveAutomation<T>(
+  token: string,
+  requestId: string,
+  digest: string,
+  approvalToken: string,
+): Promise<T> {
+  const r = await fetch("/control/automation/requests/" + encodeURIComponent(requestId) + "/approve", {
+    method: "POST",
+    headers: {
+      "X-Jarvis-Token": token,
+      "X-Jarvis-Approval": approvalToken,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ digest }),
+  });
+  if (!r.ok) {
+    let detail = "Approval failed";
+    try {
+      const data = await r.json();
+      if (typeof data.detail === "string") detail = data.detail;
     } catch {
       /* use safe fallback */
     }

@@ -1,4 +1,5 @@
 """Approval-state tests for exact, one-use automation requests."""
+import os
 import sys
 import tempfile
 import unittest
@@ -110,12 +111,14 @@ class AutomationApiTests(unittest.TestCase):
         from fastapi.testclient import TestClient
         app.dependency_overrides[auth] = lambda: None
         self.app = app
+        os.environ["JARVIS_ADMIN_TOKEN"] = "approval-test-token"
         self.client = TestClient(app, base_url="http://127.0.0.1")
         self.client.__enter__()
 
     def tearDown(self):
         self.client.__exit__(None, None, None)
         self.app.dependency_overrides.clear()
+        os.environ["JARVIS_ADMIN_TOKEN"] = "test-only-token"
         self.temp.cleanup()
 
     def test_request_review_rejection_and_cancellation(self):
@@ -135,6 +138,28 @@ class AutomationApiTests(unittest.TestCase):
         }).json()
         cancelled = self.client.post("/control/automation/requests/" + second["id"] + "/cancel")
         self.assertEqual(cancelled.json()["status"], "cancelled")
+
+    def test_approval_requires_reauthentication_and_reviewed_digest(self):
+        created = self.client.post("/control/automation/requests", json={
+            "category": "windows", "action": "list_processes", "arguments": {},
+        }).json()
+        path = "/control/automation/requests/" + created["id"] + "/approve"
+        self.assertEqual(
+            self.client.post(path, json={"digest": created["digest"]}).status_code,
+            401,
+        )
+        self.assertEqual(
+            self.client.post(
+                path,
+                headers={"X-Jarvis-Approval": "approval-test-token"},
+                json={"digest": "0" * 64},
+            ).status_code,
+            409,
+        )
+        self.assertEqual(
+            self.client.get("/control/automation/requests/" + created["id"]).json()["status"],
+            "awaiting_approval",
+        )
 
     def test_emergency_stop_cancels_pending_automation(self):
         created = self.client.post("/control/automation/requests", json={

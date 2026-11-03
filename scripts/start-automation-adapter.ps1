@@ -34,7 +34,21 @@ $start = @{
  RedirectStandardOutput = Join-Path $work "automation-adapter-$Port.out.log"
  RedirectStandardError = Join-Path $work "automation-adapter-$Port.err.log"
 }
-$process = Start-Process @start
+$sensitive = @{}
+Get-ChildItem Env: | Where-Object {
+ $_.Name -ne 'JARVIS_AUTOMATION_SECRET' -and
+ $_.Name -match '(?i)(ADMIN_TOKEN|API_KEY|ACCESS_KEY|SECRET|PASSWORD|CREDENTIAL)'
+} | ForEach-Object {
+ $sensitive[$_.Name] = $_.Value
+ Remove-Item -LiteralPath ('Env:' + $_.Name)
+}
+try {
+ $process = Start-Process @start
+} finally {
+ foreach ($entry in $sensitive.GetEnumerator()) {
+  Set-Item -LiteralPath ('Env:' + $entry.Key) -Value $entry.Value
+ }
+}
 [pscustomobject]@{
  ProcessId = $process.Id
  Url = $env:JARVIS_AUTOMATION_URL

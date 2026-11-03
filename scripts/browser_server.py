@@ -10,7 +10,9 @@ os.environ['JARVIS_TEST_TEMPLATES']='1'
 with tempfile.TemporaryDirectory(prefix='jarvis-browser-') as directory:
  os.environ['JARVIS_DB']=str(Path(directory)/'test.db')
  os.environ['JARVIS_AUTOMATION_SECRET']=secrets.token_urlsafe(32)
- os.environ['JARVIS_AUTOMATION_URL']='http://127.0.0.1:18803/mcp'
+ adapter_port=int(os.environ.get('JARVIS_BROWSER_TEST_ADAPTER_PORT','18803'))
+ gateway_port=int(os.environ.get('JARVIS_BROWSER_TEST_PORT','8766'))
+ os.environ['JARVIS_AUTOMATION_URL']=f'http://127.0.0.1:{adapter_port}/mcp'
  import uvicorn
  from adapter.automation_adapter import build_app
  from adapter.browser_tools import BrowserTools
@@ -19,7 +21,7 @@ with tempfile.TemporaryDirectory(prefix='jarvis-browser-') as directory:
  windows=WindowsTools([Path(directory)],[Path(sys.executable).resolve()])
  adapter=uvicorn.Server(uvicorn.Config(
   build_app(windows,os.environ['JARVIS_AUTOMATION_SECRET'],browser),
-  host='127.0.0.1',port=18803,log_level='error'))
+  host='127.0.0.1',port=adapter_port,log_level='error'))
  thread=threading.Thread(target=adapter.run,daemon=True)
  thread.start()
  for _ in range(50):
@@ -27,7 +29,7 @@ with tempfile.TemporaryDirectory(prefix='jarvis-browser-') as directory:
   time.sleep(.1)
  if not adapter.started:raise SystemExit('Automation adapter did not start')
  try:
-  uvicorn.run('gateway:app',host='127.0.0.1',port=8766,log_level='warning')
+  uvicorn.run('gateway:app',host='127.0.0.1',port=gateway_port,log_level='warning')
  finally:
   adapter.should_exit=True
   thread.join(timeout=5)

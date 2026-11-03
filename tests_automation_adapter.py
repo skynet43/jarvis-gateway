@@ -93,14 +93,27 @@ class AdapterAuthTests(unittest.TestCase):
         from fastapi.testclient import TestClient
         from adapter.automation_adapter import build_app
         with tempfile.TemporaryDirectory(prefix="jarvis-adapter-auth-") as directory:
-            tools = WindowsTools([Path(directory)], [Path(sys.executable).resolve()])
+            root = Path(directory)
+            sleeper = root / "sleeper.py"
+            sleeper.write_text("import time\ntime.sleep(30)\n", encoding="utf-8")
+            tools = WindowsTools([root], [Path(sys.executable).resolve()])
             app = build_app(tools, "s" * 32)
             with TestClient(app, base_url="http://127.0.0.1") as client:
                 self.assertEqual(client.get("/mcp").status_code, 401)
+                self.assertEqual(client.post("/emergency-stop").status_code, 401)
                 accepted = client.get(
                     "/mcp", headers={"Authorization": "Bearer " + "s" * 32}
                 )
                 self.assertNotEqual(accepted.status_code, 401)
+                started = tools.start_process(sys.executable, [str(sleeper)])
+                process = tools.owned[started["pid"]]
+                stopped = client.post(
+                    "/emergency-stop",
+                    headers={"Authorization": "Bearer " + "s" * 32},
+                )
+                self.assertEqual(stopped.status_code, 200, stopped.text)
+                self.assertIsNotNone(process.poll())
+                self.assertFalse(tools.owned)
             tools.close()
 
 
@@ -133,8 +146,15 @@ class AdapterIntegrationTests(unittest.TestCase):
             os.environ["JARVIS_AUTOMATION_URL"] = "http://127.0.0.1:18800/mcp"
             os.environ["JARVIS_AUTOMATION_SECRET"] = secret
             app.dependency_overrides[auth] = lambda: None
+            os.environ["JARVIS_ADMIN_TOKEN"] = "approval-test-token"
             try:
                 with TestClient(app, base_url="http://127.0.0.1") as client:
+                    def approve(row):
+                        return client.post(
+                            "/control/automation/requests/" + row["id"] + "/approve",
+                            headers={"X-Jarvis-Approval": "approval-test-token"},
+                            json={"digest": row["digest"]},
+                        )
                     health = client.get("/control/automation/health")
                     self.assertEqual(health.status_code, 200, health.text)
                     self.assertTrue(health.json()["available"])
@@ -143,9 +163,7 @@ class AdapterIntegrationTests(unittest.TestCase):
                         "category": "windows", "action": "list_files",
                         "arguments": {"path": str(root)},
                     }).json()
-                    approved = client.post(
-                        "/control/automation/requests/" + created["id"] + "/approve"
-                    )
+                    approved = approve(created)
                     self.assertEqual(approved.status_code, 200, approved.text)
                     self.assertEqual(approved.json()["status"], "completed")
                     self.assertIsInstance(approved.json()["result"], dict)
@@ -155,9 +173,7 @@ class AdapterIntegrationTests(unittest.TestCase):
                         "category": "windows", "action": "list_processes",
                         "arguments": {"limit": 5},
                     }).json()
-                    process_result = client.post(
-                        "/control/automation/requests/" + process_request["id"] + "/approve"
-                    )
+                    process_result = approve(process_request)
                     self.assertEqual(process_result.status_code, 200, process_result.text)
                     self.assertEqual(process_result.json()["status"], "completed")
                     self.assertIn("pid", str(process_result.json()["result"]))
@@ -165,22 +181,19 @@ class AdapterIntegrationTests(unittest.TestCase):
                     failed_request = client.post("/control/automation/requests", json={
                         "category": "windows", "action": "list_processes", "arguments": {},
                     }).json()
-                    failed = client.post(
-                        "/control/automation/requests/" + failed_request["id"] + "/approve"
-                    )
+                    failed = approve(failed_request)
                     self.assertEqual(failed.status_code, 502, failed.text)
                     failed_detail = client.get(
                         "/control/automation/requests/" + failed_request["id"]
                     ).json()
                     self.assertEqual(failed_detail["status"], "failed")
                     os.environ["JARVIS_AUTOMATION_SECRET"] = secret
-                    self.assertEqual(client.post(
-                        "/control/automation/requests/" + created["id"] + "/approve"
-                    ).status_code, 409)
+                    self.assertEqual(approve(created).status_code, 409)
             finally:
                 app.dependency_overrides.clear()
                 os.environ.pop("JARVIS_AUTOMATION_URL", None)
                 os.environ.pop("JARVIS_AUTOMATION_SECRET", None)
+                os.environ["JARVIS_ADMIN_TOKEN"] = "test-only-token"
                 server.should_exit = True
                 thread.join(timeout=5)
                 tools.close()
@@ -217,11 +230,12 @@ class BrowserApprovalIntegrationTests(unittest.TestCase):
             os.environ["JARVIS_AUTOMATION_URL"]="http://127.0.0.1:18802/mcp"
             os.environ["JARVIS_AUTOMATION_SECRET"]=secret
             app.dependency_overrides[auth]=lambda:None
+            os.environ["JARVIS_ADMIN_TOKEN"]="approval-test-token"
             try:
                 with TestClient(app,base_url="http://127.0.0.1") as client:
                     def run(action,arguments):
                         row=client.post("/control/automation/requests",json={"category":"browser","action":action,"arguments":arguments}).json()
-                        response=client.post("/control/automation/requests/"+row["id"]+"/approve")
+                        response=client.post("/control/automation/requests/"+row["id"]+"/approve",headers={"X-Jarvis-Approval":"approval-test-token"},json={"digest":row["digest"]})
                         self.assertEqual(response.status_code,200,response.text)
                         return response.json()["result"]["output"]
                     session=run("browser_create",{})["session_id"]
@@ -230,7 +244,7 @@ class BrowserApprovalIntegrationTests(unittest.TestCase):
                     self.assertIn("browser ready",run("browser_snapshot",{"session_id":session})["text"])
                     self.assertEqual(run("browser_close",{"session_id":session})["status"],"closed")
             finally:
-                app.dependency_overrides.clear();os.environ.pop("JARVIS_AUTOMATION_URL",None);os.environ.pop("JARVIS_AUTOMATION_SECRET",None)
+                app.dependency_overrides.clear();os.environ.pop("JARVIS_AUTOMATION_URL",None);os.environ.pop("JARVIS_AUTOMATION_SECRET",None);os.environ["JARVIS_ADMIN_TOKEN"]="test-only-token"
                 server.should_exit=True;thread.join(timeout=5);browser.close();windows.close()
                 page_server.shutdown();page_thread.join(timeout=5);page_server.server_close()
 

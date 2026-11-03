@@ -1,6 +1,9 @@
 import { test, expect } from "@playwright/test";
 
 async function login(page: import("@playwright/test").Page) {
+  page.on("dialog", (dialog) =>
+    dialog.accept(process.env.JARVIS_ACCEPTANCE_TOKEN || ""),
+  );
   await page.addInitScript(() => localStorage.setItem("jarvis-tour-done", "true"));
   await page.goto("/dashboard");
   await expect(page.getByText("Workspace ready", { exact: true })).toBeVisible({

@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import {
   api,
+  approveAutomation,
   streamEvents,
   type Job,
   type Agent,
@@ -253,18 +254,27 @@ function App() {
     tourHeading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     let cancelled = false;
-    let retry: ReturnType<typeof setTimeout>;
     async function connectWorkspace() {
       try {
-        const response = await fetch("/control/browser-session", {method: "POST"});
-        if (!response.ok) throw new Error("Local workspace connection is unavailable.");
-        if (!cancelled) {setToken("local-session"); setError("");}
+        let response = await fetch("/control/browser-session", {method: "POST"});
+        let sessionToken = "private-owner-session";
+        if (response.status === 401) {
+          const entered = window.prompt("Enter the Jarvis admin token to open this local workspace.");
+          if (!entered) throw new Error("Admin token confirmation is required.");
+          response = await fetch("/control/browser-session", {
+            method: "POST",
+            headers: {"X-Jarvis-Token": entered},
+          });
+          sessionToken = entered;
+        }
+        if (!response.ok) throw new Error("Workspace connection is unavailable.");
+        if (!cancelled) {setToken(sessionToken); setError("");}
       } catch (e) {
-        if (!cancelled) {setError(String(e)); retry=setTimeout(() => void connectWorkspace(),5000);}
+        if (!cancelled) {setError(String(e));}
       }
     }
     void connectWorkspace();
-    return () => {cancelled=true; clearTimeout(retry);};
+    return () => {cancelled=true;};
   }, []);
   useEffect(() => {
     if (!token) return;
@@ -1094,7 +1104,7 @@ function App() {
               </div>
               <section className="panel">
                 <h2>Automation approvals</h2>
-                {automationPending.length?automationPending.map((r)=><article className="session" key={r.id}><span className="eyebrow">{r.category} · {r.risk.toUpperCase()} RISK</span><h3>{r.action}</h3><pre>{JSON.stringify(r.arguments,null,2)}</pre><small>Expires {new Date(r.expires*1000).toLocaleString()} · digest {r.digest.slice(0,12)}…</small><div className="tools"><button className="primary" disabled={busy} onClick={()=>void action(()=>api(token,"automation/requests/"+r.id+"/approve",{}))}>Approve once</button><button disabled={busy} onClick={()=>void action(()=>api(token,"automation/requests/"+r.id+"/reject",{}))}>Reject</button></div></article>):<div className="empty">No automation decisions waiting.</div>}
+                {automationPending.length?automationPending.map((r)=><article className="session" key={r.id}><span className="eyebrow">{r.category} · {r.risk.toUpperCase()} RISK</span><h3>{r.action}</h3><pre>{JSON.stringify(r.arguments,null,2)}</pre><small>Expires {new Date(r.expires*1000).toLocaleString()} · digest {r.digest.slice(0,12)}…</small><div className="tools"><button className="primary" disabled={busy} onClick={()=>{const approval=window.prompt("Re-enter the Jarvis admin token to approve this exact digest: "+r.digest);if(approval)void action(()=>approveAutomation(token,r.id,r.digest,approval));}}>Approve once</button><button disabled={busy} onClick={()=>void action(()=>api(token,"automation/requests/"+r.id+"/reject",{}))}>Reject</button></div></article>):<div className="empty">No automation decisions waiting.</div>}
               </section>
               <section className="panel">
                 <h2>Awaiting your approval</h2>

@@ -6,7 +6,7 @@ import os
 import secrets
 import time
 from urllib.parse import urlsplit
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 router=APIRouter()
@@ -26,16 +26,24 @@ def valid(request: Request):
     except (ValueError,TypeError):
         return False
 @router.post("/control/browser-session")
-def open_session(request: Request):
+def open_session(
+    request: Request,
+    x_jarvis_token: str | None = Header(default=None),
+):
     host=request.url.hostname
     remote_origin=os.environ.get("JARVIS_HTTPS_ORIGIN","").rstrip("/")
     remote_host=urlsplit(remote_origin).hostname if remote_origin.startswith("https://") else None
     owner=os.environ.get("JARVIS_TAILSCALE_LOGIN","")
     local=host in LOCAL_HOSTS and request.client and request.client.host in LOCAL_HOSTS
+    configured=os.environ.get("JARVIS_ADMIN_TOKEN","")
+    local_authenticated=(local and configured and x_jarvis_token
+                         and hmac.compare_digest(configured.encode(),x_jarvis_token.encode()))
     private_remote=(remote_host and host==remote_host and request.client and tailnet_address(request.client.host)
                     and owner and hmac.compare_digest(request.headers.get("tailscale-user-login",""),owner))
-    if not (local or private_remote):
-        raise HTTPException(403,"Automatic access is available on this laptop. Remote access requires a configured private connection.")
+    if local and not local_authenticated:
+        raise HTTPException(401,"Admin token confirmation is required on localhost.")
+    if not (local_authenticated or private_remote):
+        raise HTTPException(403,"Access requires an authenticated localhost session or configured private owner connection.")
     # Same-origin middleware rejects cross-site origins and DNS-rebinding hosts.
     expires=str(int(time.time())+8*3600)
     signature=hmac.new(KEY,(expires+"|"+str(request.url.hostname)).encode(),hashlib.sha256).hexdigest()

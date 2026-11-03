@@ -146,7 +146,9 @@ def stop_all():
             event(db,sid,"cancel_requested",{})
         from automation_store import cancel_all
         automation_ids=cancel_all(db)
-        return {"requested":len(ids)+len(runtime_ids)+len(automation_ids),"persona_tasks":len(ids),"runtime_sessions":len(runtime_ids),"automation_requests":len(automation_ids),"scope":"All gateway tasks, runtime sessions, and automation requests; no model unload or system shutdown"}
+        from automation_api import interrupt_active_adapter_sync
+        adapter_interrupted=interrupt_active_adapter_sync() if automation_ids else False
+        return {"requested":len(ids)+len(runtime_ids)+len(automation_ids),"persona_tasks":len(ids),"runtime_sessions":len(runtime_ids),"automation_requests":len(automation_ids),"adapter_interrupted":adapter_interrupted,"scope":"All gateway tasks, runtime sessions, and automation requests; active adapter processes and browser worker are terminated when reachable; no model unload or system shutdown"}
 @router.get("/audit")
 def audit_events(after: int = Query(0,ge=0), limit: int = Query(100,ge=1,le=500)):
     with LOCK, connect() as db:

@@ -1,9 +1,12 @@
 """Authenticated approval and execution API for automation requests."""
+import hmac
 import json
 import os
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from pydantic import BaseModel, Field
+import httpx
 from mcp import Client
 from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 
@@ -27,6 +30,40 @@ router = APIRouter(
     dependencies=[Depends(auth)],
     tags=["Automation"],
 )
+
+
+def _adapter_emergency():
+    url = os.environ.get("JARVIS_AUTOMATION_URL", "")
+    secret = os.environ.get("JARVIS_AUTOMATION_SECRET", "")
+    parsed = urlsplit(url)
+    if (parsed.scheme != "http" or parsed.hostname not in ("127.0.0.1", "localhost", "::1")
+            or not parsed.port or len(secret) < 32):
+        return None, None
+    return parsed._replace(path="/emergency-stop", query="", fragment="").geturl(), secret
+
+
+async def interrupt_active_adapter():
+    url, secret = _adapter_emergency()
+    if not url:
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=5, trust_env=False) as client:
+            response = await client.post(url, headers={"Authorization": "Bearer " + secret})
+        return response.status_code == 200
+    except Exception:
+        return False
+
+
+def interrupt_active_adapter_sync():
+    url, secret = _adapter_emergency()
+    if not url:
+        return False
+    try:
+        with httpx.Client(timeout=5, trust_env=False) as client:
+            response = client.post(url, headers={"Authorization": "Bearer " + secret})
+        return response.status_code == 200
+    except Exception:
+        return False
 
 
 def _not_found(operation):
@@ -96,18 +133,36 @@ async def _call_adapter(row):
     return normalized
 
 
+class ApprovalDecision(BaseModel):
+    digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 @router.post("/requests/{request_id}/approve")
-async def approve(request_id: str):
+async def approve(
+    request_id: str,
+    decision: ApprovalDecision,
+    x_jarvis_approval: str | None = Header(default=None),
+):
+    configured = os.environ.get("JARVIS_ADMIN_TOKEN", "")
+    if (not configured or not x_jarvis_approval
+            or not hmac.compare_digest(configured.encode(), x_jarvis_approval.encode())):
+        raise HTTPException(401, "Explicit approval authentication required")
     expire()
     row = _not_found(lambda: get(request_id))
-    _not_found(lambda: approve_request(request_id, row["digest"]))
+    if not hmac.compare_digest(row["digest"], decision.digest):
+        raise HTTPException(409, "Approval digest does not match the reviewed request")
+    _not_found(lambda: approve_request(request_id, decision.digest))
     try:
         result = await _call_adapter(row)
         return complete_request(request_id, result)
     except HTTPException as exc:
+        if get(request_id)["status"] == "cancelled":
+            return get(request_id)
         fail_request(request_id, exc.detail)
         raise
     except Exception:
+        if get(request_id)["status"] == "cancelled":
+            return get(request_id)
         fail_request(request_id, "Automation adapter call failed")
         raise HTTPException(502, "Automation adapter call failed") from None
 
@@ -119,9 +174,12 @@ def reject(request_id: str):
 
 
 @router.post("/requests/{request_id}/cancel")
-def cancel(request_id: str):
+async def cancel(request_id: str):
     expire()
-    return _not_found(lambda: cancel_request(request_id))
+    row = _not_found(lambda: cancel_request(request_id))
+    if row["status"] == "cancelled":
+        await interrupt_active_adapter()
+    return row
 
 
 @router.get("/health")
