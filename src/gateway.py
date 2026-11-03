@@ -46,6 +46,8 @@ from providers import router as providers_router
 app.include_router(providers_router)
 from mcp_bridge import router as mcp_router
 app.include_router(mcp_router)
+from automation_api import router as automation_router
+app.include_router(automation_router)
 buckets=defaultdict(deque)
 @app.middleware("http")
 async def guard(request: Request, call_next):
