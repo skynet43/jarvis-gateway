@@ -1,4 +1,5 @@
 """Authenticated loopback MCP server for approved Windows automation."""
+import atexit
 import hmac
 import os
 from pathlib import Path
@@ -6,6 +7,7 @@ from pathlib import Path
 import uvicorn
 from mcp.server import MCPServer
 
+from adapter.browser_tools import BrowserTools
 from adapter.windows_tools import WindowsTools
 
 
@@ -30,7 +32,7 @@ class StartupSecretMiddleware:
         await self.app(scope, receive, send)
 
 
-def build_app(tools, secret):
+def build_app(tools, secret, browser=None):
     server = MCPServer("jarvis-automation")
 
     @server.tool()
@@ -57,6 +59,30 @@ def build_app(tools, secret):
     def windows_stop_process(pid: int):
         return tools.stop_process(pid)
 
+    if browser:
+        @server.tool()
+        def browser_create():
+            return browser.create_session()
+        @server.tool()
+        def browser_close(session_id: str):
+            return browser.close_session(session_id)
+        @server.tool()
+        def browser_navigate(session_id: str, url: str):
+            return browser.navigate(session_id, url)
+        @server.tool()
+        def browser_snapshot(session_id: str):
+            return browser.snapshot(session_id)
+        @server.tool()
+        def browser_click(session_id: str, selector: str | None = None,
+                          role: str | None = None, name: str | None = None):
+            return browser.click(session_id, selector=selector, role=role, name=name)
+        @server.tool()
+        def browser_fill(session_id: str, selector: str, text: str):
+            return browser.fill(session_id, selector, text)
+        @server.tool()
+        def browser_screenshot(session_id: str):
+            return browser.screenshot(session_id)
+
     return StartupSecretMiddleware(
         server.streamable_http_app(stateless_http=True), secret
     )
@@ -66,7 +92,12 @@ def configured_app():
     secret = os.environ.get("JARVIS_AUTOMATION_SECRET", "")
     roots = [Path(value) for value in os.environ.get("JARVIS_AUTOMATION_ROOTS", "").split(os.pathsep) if value]
     executables = [Path(value) for value in os.environ.get("JARVIS_AUTOMATION_EXECUTABLES", "").split(os.pathsep) if value]
-    return build_app(WindowsTools(roots, executables), secret)
+    output = Path(os.environ.get("JARVIS_BROWSER_OUTPUT", str(Path.cwd() / "work" / "browser-output")))
+    hosts = {value.strip().lower() for value in os.environ.get(
+        "JARVIS_BROWSER_HOSTS", "127.0.0.1,localhost").split(",") if value.strip()}
+    browser = BrowserTools(output, hosts)
+    atexit.register(browser.close)
+    return build_app(WindowsTools(roots, executables), secret, browser)
 
 
 if __name__ == "__main__":

@@ -70,27 +70,36 @@ async def _call_adapter(row):
     if (parsed.scheme != "http" or parsed.hostname not in ("127.0.0.1", "localhost", "::1")
             or not parsed.port or parsed.username or parsed.password or len(secret) < 32):
         raise HTTPException(503, "Automation adapter is not securely configured")
-    if row["category"] != "windows":
-        raise HTTPException(501, "Browser automation is not enabled yet")
+    tool_name = ("windows_" + row["action"]
+                 if row["category"] == "windows" else row["action"])
     http_client = create_mcp_http_client(
         headers={"Authorization": "Bearer " + secret}
     )
     async with http_client:
         transport = streamable_http_client(url, http_client=http_client)
         async with Client(transport, read_timeout_seconds=30) as client:
-            result = await client.call_tool("windows_" + row["action"], row["arguments"])
+            result = await client.call_tool(tool_name, row["arguments"])
             data = result.model_dump(mode="json")
-    if len(json.dumps(data).encode("utf-8")) > 65536:
+    texts = [item.get("text", "") for item in data.get("content", [])
+             if item.get("type") == "text"]
+    output = data.get("structured_content")
+    if output is None:
+        output = texts[0] if len(texts) == 1 else texts
+        if isinstance(output, str):
+            try:
+                output = json.loads(output)
+            except json.JSONDecodeError:
+                pass
+    normalized = {"output": output, "is_error": bool(data.get("is_error"))}
+    if len(json.dumps(normalized).encode("utf-8")) > 65536:
         raise ValueError("Automation result too large")
-    return data
+    return normalized
 
 
 @router.post("/requests/{request_id}/approve")
 async def approve(request_id: str):
     expire()
     row = _not_found(lambda: get(request_id))
-    if row["category"] != "windows":
-        raise HTTPException(501, "Browser automation is not enabled yet")
     _not_found(lambda: approve_request(request_id, row["digest"]))
     try:
         result = await _call_adapter(row)

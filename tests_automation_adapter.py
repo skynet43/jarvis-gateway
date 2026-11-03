@@ -46,6 +46,48 @@ class WindowsToolTests(unittest.TestCase):
             self.tools.stop_process(started["pid"])
 
 
+class BrowserToolTests(unittest.TestCase):
+    def test_isolated_browser_policy_and_lifecycle(self):
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        from adapter.browser_tools import BrowserTools
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                body = b"""<title>Jarvis Test</title><button id='go' onclick=\"document.querySelector('#status').textContent='clicked'\">Go</button><div id='status'>ready</div><input id='text'><input id='password' type='password'><input id='upload' type='file'><a id='download' href='/file' download>Download</a>"""
+                self.send_response(200); self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+            def log_message(self, *args):
+                pass
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
+        with tempfile.TemporaryDirectory(prefix="jarvis-browser-tools-") as directory:
+            tools = BrowserTools(Path(directory), {"127.0.0.1"})
+            try:
+                session = tools.create_session()
+                url = f"http://127.0.0.1:{server.server_port}/"
+                self.assertEqual(tools.navigate(session["session_id"], url)["title"], "Jarvis Test")
+                self.assertIn("ready", tools.snapshot(session["session_id"])["text"])
+                tools.fill(session["session_id"], "#text", "hello")
+                with self.assertRaises(ValueError):
+                    tools.fill(session["session_id"], "#password", "blocked")
+                with self.assertRaises(ValueError):
+                    tools.click(session["session_id"], selector="#upload")
+                with self.assertRaises(ValueError):
+                    tools.click(session["session_id"], selector="#download")
+                with self.assertRaises(ValueError):
+                    tools.navigate(session["session_id"], "https://user:pass@example.com/")
+                tools.click(session["session_id"], selector="#go")
+                self.assertIn("clicked", tools.snapshot(session["session_id"])["text"])
+                shot = tools.screenshot(session["session_id"])
+                self.assertTrue(Path(shot["path"]).is_relative_to(Path(directory)))
+                self.assertEqual(tools.close_session(session["session_id"])["status"], "closed")
+                with self.assertRaises(ValueError):
+                    tools.navigate(session["session_id"], "file:///C:/Windows/win.ini")
+            finally:
+                tools.close()
+                server.shutdown(); thread.join(timeout=5); server.server_close()
+
+
 class AdapterAuthTests(unittest.TestCase):
     def test_mcp_endpoint_requires_startup_secret(self):
         from fastapi.testclient import TestClient
@@ -107,7 +149,8 @@ class AdapterIntegrationTests(unittest.TestCase):
                     self.assertEqual(approved.status_code, 200, approved.text)
                     self.assertEqual(approved.json()["status"], "completed")
                     self.assertIsInstance(approved.json()["result"], dict)
-                    self.assertIn("visible.txt", str(approved.json()["result"]))
+                    self.assertIn("output", approved.json()["result"])
+                    self.assertIn("visible.txt", str(approved.json()["result"]["output"]))
                     process_request = client.post("/control/automation/requests", json={
                         "category": "windows", "action": "list_processes",
                         "arguments": {"limit": 5},
@@ -141,6 +184,55 @@ class AdapterIntegrationTests(unittest.TestCase):
                 server.should_exit = True
                 thread.join(timeout=5)
                 tools.close()
+
+
+class BrowserApprovalIntegrationTests(unittest.TestCase):
+    def test_approved_browser_sequence_uses_isolated_profile(self):
+        import threading, time, uvicorn
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        from fastapi.testclient import TestClient
+        from adapter.automation_adapter import build_app
+        from adapter.browser_tools import BrowserTools
+        from control import auth
+        import control
+        from gateway import app
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                body=b"<title>Approved Browser</title><p>browser ready</p>"
+                self.send_response(200); self.send_header("Content-Length",str(len(body)))
+                self.end_headers(); self.wfile.write(body)
+            def log_message(self,*args): pass
+        page_server=ThreadingHTTPServer(("127.0.0.1",0),Handler)
+        page_thread=threading.Thread(target=page_server.serve_forever,daemon=True);page_thread.start()
+        secret="b"*32
+        with tempfile.TemporaryDirectory(prefix="jarvis-browser-approval-") as directory:
+            root=Path(directory);control.DB=root/"test.db"
+            windows=WindowsTools([root],[Path(sys.executable).resolve()])
+            browser=BrowserTools(root/"shots",{"127.0.0.1"})
+            server=uvicorn.Server(uvicorn.Config(build_app(windows,secret,browser),host="127.0.0.1",port=18802,log_level="error"))
+            thread=threading.Thread(target=server.run,daemon=True);thread.start()
+            for _ in range(50):
+                if server.started: break
+                time.sleep(.1)
+            os.environ["JARVIS_AUTOMATION_URL"]="http://127.0.0.1:18802/mcp"
+            os.environ["JARVIS_AUTOMATION_SECRET"]=secret
+            app.dependency_overrides[auth]=lambda:None
+            try:
+                with TestClient(app,base_url="http://127.0.0.1") as client:
+                    def run(action,arguments):
+                        row=client.post("/control/automation/requests",json={"category":"browser","action":action,"arguments":arguments}).json()
+                        response=client.post("/control/automation/requests/"+row["id"]+"/approve")
+                        self.assertEqual(response.status_code,200,response.text)
+                        return response.json()["result"]["output"]
+                    session=run("browser_create",{})["session_id"]
+                    url=f"http://127.0.0.1:{page_server.server_port}/"
+                    self.assertEqual(run("browser_navigate",{"session_id":session,"url":url})["title"],"Approved Browser")
+                    self.assertIn("browser ready",run("browser_snapshot",{"session_id":session})["text"])
+                    self.assertEqual(run("browser_close",{"session_id":session})["status"],"closed")
+            finally:
+                app.dependency_overrides.clear();os.environ.pop("JARVIS_AUTOMATION_URL",None);os.environ.pop("JARVIS_AUTOMATION_SECRET",None)
+                server.should_exit=True;thread.join(timeout=5);browser.close();windows.close()
+                page_server.shutdown();page_thread.join(timeout=5);page_server.server_close()
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 param(
  [string[]]$Roots,
  [string[]]$Executables,
+ [string[]]$BrowserHosts = @('127.0.0.1','localhost'),
  [int]$Port = 18798
 )
 $ErrorActionPreference = 'Stop'
@@ -20,6 +21,8 @@ $env:JARVIS_AUTOMATION_ROOTS = $Roots -join [IO.Path]::PathSeparator
 $env:JARVIS_AUTOMATION_EXECUTABLES = $Executables -join [IO.Path]::PathSeparator
 $env:JARVIS_AUTOMATION_PORT = [string]$Port
 $env:JARVIS_AUTOMATION_URL = "http://127.0.0.1:$Port/mcp"
+$env:JARVIS_BROWSER_HOSTS = $BrowserHosts -join ','
+$env:JARVIS_BROWSER_OUTPUT = Join-Path $root 'work\browser-output'
 $work = Join-Path $root 'work'
 New-Item -ItemType Directory -Force -Path $work | Out-Null
 $start = @{
