@@ -1,5 +1,7 @@
-import os, sys, unittest, tempfile
+import asyncio, os, sys, unittest, tempfile
+from contextlib import contextmanager
 from pathlib import Path
+from unittest import mock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 os.environ["JARVIS_ADMIN_TOKEN"] = "test-only-token"
 from fastapi.testclient import TestClient
@@ -56,6 +58,38 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(r.status_code,200)
         self.assertEqual(r.json()["status"],"cancelled")
         self.assertTrue(any(a["action"]=="job.cancelled" for a in self.c.get("/control/audit",headers=self.h).json()))
+    def test_cancel_wins_worker_finalization_race(self):
+        import control, worker
+        job_id="cancel-finalize-race"
+        stamp=control.now()
+        with control.LOCK, control.connect() as db:
+            db.execute("INSERT INTO jobs(id,agent,prompt,status,created,updated) VALUES(?,?,?,?,?,?)",
+                       (job_id,"rosie","race","queued",stamp,stamp))
+        original_connect=worker.connect
+        cancellation_injected=False
+        @contextmanager
+        def racing_connect():
+            nonlocal cancellation_injected
+            with original_connect() as db:
+                class ConnectionProxy:
+                    def execute(self, sql, params=()):
+                        nonlocal cancellation_injected
+                        if not cancellation_injected and sql.lstrip().startswith("UPDATE jobs SET") and "stream_closed" in sql:
+                            cancellation_injected=True
+                            with original_connect() as cancel_db:
+                                control.request_cancel(cancel_db,job_id)
+                        return db.execute(sql,params)
+                    def __getattr__(self,name):
+                        return getattr(db,name)
+                yield ConnectionProxy()
+        async def immediate_infer(agent,prompt):
+            return "completed too late"
+        with mock.patch.object(worker,"connect",racing_connect), mock.patch.object(worker,"infer",immediate_infer):
+            asyncio.run(worker.process_one())
+        self.assertTrue(cancellation_injected)
+        with control.LOCK, control.connect() as db:
+            self.assertEqual(db.execute("SELECT status FROM jobs WHERE id=?",(job_id,)).fetchone()[0],"cancelled")
+            self.assertIsNone(db.execute("SELECT result FROM job_results WHERE id=?",(job_id,)).fetchone())
     def test_invalid_agent(self):
         self.assertEqual(self.c.post("/control/jobs",headers=self.h,json={"agent":"unknown","prompt":"test"}).status_code,404)
 if __name__ == "__main__":

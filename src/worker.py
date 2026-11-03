@@ -81,13 +81,16 @@ async def process_one(stop=None):
             except asyncio.CancelledError:
                 pass
     with LOCK, connect() as db:
-        current=db.execute("SELECT status FROM jobs WHERE id=?",(job_id,)).fetchone()
-        if current and current[0] in ("cancelling","cancelled"):
-            status,error="cancelled",None
-        if current and current[0] in ("running","cancelling"):
+        stamp=now()
+        updated=db.execute(
+            "UPDATE jobs SET status=CASE WHEN status='cancelling' THEN 'cancelled' ELSE ? END,"
+            "updated=?,finished=?,error=CASE WHEN status='cancelling' THEN NULL ELSE ? END,stream_closed=? "
+            "WHERE id=? AND status IN ('running','cancelling')",
+            (status,stamp,stamp,error,stamp,job_id))
+        if updated.rowcount:
+            status=db.execute("SELECT status FROM jobs WHERE id=?",(job_id,)).fetchone()[0]
             if status=="completed":
                 db.execute("INSERT OR REPLACE INTO job_results VALUES (?,?)",(job_id,answer))
-            db.execute("UPDATE jobs SET status=?,updated=?,finished=?,error=?,stream_closed=? WHERE id=?",(status,now(),now(),error,now(),job_id))
             record(db,"job."+status,{"id":job_id,"request_stream_closed":True,"inference_stopped":"unverified","model_unloaded":False})
     return True
 def start():
