@@ -39,8 +39,8 @@ cd ..
 .\scripts\acceptance.ps1 -Base http://127.0.0.1:8767
 ```
 
-Tests use isolated databases and credentials. `ASTRA_ACCEPTANCE.md` records the latest observed results and remaining limits. A running dashboard does not by itself prove provider credentials or remote Android access.
+Tests use isolated databases and credentials. `ASTRA_ACCEPTANCE.md` records the latest observed results and remaining limits. The Android HTTPS dashboard and task flow have been observed; a running dashboard does not by itself prove hosted-provider credentials.
 
 ## Android HTTPS
 
-Tailscale must be installed and connected on both devices. On Skynet, private Serve is configured at `https://skynet.tail01ff2d.ts.net`, proxying to port 8767. The preview launcher sets the Tailscale node owner as the only accepted remote browser identity; Jarvis checks Serve's `Tailscale-User-Login` header for a tailnet client and issues a secure browser cookie. The HTTPS browser flow passed from the laptop. Open that URL on Android while signed into the same tailnet to complete phone verification. Do not expose the gateway through Funnel or a public reverse proxy.
+Tailscale must be installed and connected on both devices. On Skynet, private Serve is configured at `https://skynet.tail01ff2d.ts.net`, proxying to port 8767. The preview launcher sets the Tailscale node owner as the only accepted remote browser identity; Jarvis checks Serve's `Tailscale-User-Login` header for a tailnet client and issues a secure browser cookie. The HTTPS dashboard and new-task flow passed from both the laptop and an Android phone signed into the same tailnet. Do not expose the gateway through Funnel or a public reverse proxy.
