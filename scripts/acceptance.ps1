@@ -1,12 +1,11 @@
+param([string]$Base='http://127.0.0.1:8765')
 $ErrorActionPreference='Stop'
-$base='http://127.0.0.1:8765'
 $headers=@{'X-Jarvis-Token'=[Environment]::GetEnvironmentVariable('JARVIS_ADMIN_TOKEN','User')}
-$body=@{agent='rosie';prompt='Respond with the single word READY'} | ConvertTo-Json
-$job=Invoke-RestMethod "$base/control/jobs" -Method Post -Headers $headers -ContentType 'application/json' -Body $body
-Write-Output "CREATED $($job.id) $($job.status)"
-for($i=0;$i -lt 30;$i++){
- Start-Sleep -Seconds 3
- $found=Invoke-RestMethod "$base/control/jobs" -Headers $headers | Where-Object id -eq $job.id
- Write-Output "POLL $i $($found.status)"
- if($found.status -in @('completed','failed','cancelled')){Write-Output "RESULT $($found.result)";break}
-}
+$job=Invoke-RestMethod "$Base/control/jobs" -Method Post -Headers $headers -ContentType 'application/json' -Body (@{agent='rosie';prompt='Respond with the single word READY'}|ConvertTo-Json)
+$deadline=(Get-Date).AddSeconds(150)
+do {
+ Start-Sleep -Milliseconds 500
+ $current=Invoke-RestMethod "$Base/control/jobs/$($job.id)" -Headers $headers
+} while ($current.status -in @('queued','running','cancelling') -and (Get-Date) -lt $deadline)
+if ($current.status -ne 'completed' -or $current.result -notmatch 'READY') { throw "Inference acceptance failed: $($current.status)" }
+Write-Output "INFERENCE_PASS job=$($job.id) output_saved=True"

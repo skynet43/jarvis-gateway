@@ -16,3 +16,8 @@ playwright-report/
 test-results/
 node_modules/
 dist/
+
+work/
+*.tsbuildinfo
+.env.*
+!*.example

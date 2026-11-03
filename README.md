@@ -1,62 +1,46 @@
 # Jarvis Gateway
 
-Local-first FastAPI control plane for the Skynet / Jarvis Command Center. The current implementation provides authenticated job submission, SQLite audit history, three named Ollama personas, a dark browser dashboard, and cooperative cancellation. **The personas are prompt configurations, not autonomous tool-using agents.**
+Jarvis is a Windows-first, loopback FastAPI control center with a React dashboard, SQLite task history, local Ollama inference, supervised source-reading runtime sessions, transient model-provider connections, and local MCP tool discovery with one-use approvals.
 
-## Requirements
-
-- Python and dependencies from `requirements.txt`
-- Optional Ollama at `http://127.0.0.1:11434`; current worker model: `tool-star-qwen:3b`
-- Windows PowerShell for supplied acceptance scripts; NVIDIA GPU for the optional GPU probe
-
-## Windows setup
+## Start on Windows
 
 ```powershell
 cd C:\Users\Codex\jarvis-gateway
 py -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-# Configure a long random admin token in the Windows user environment.
-[Environment]::SetEnvironmentVariable('JARVIS_ADMIN_TOKEN', '<replace-with-strong-random-secret>', 'User')
+cd frontend
+npm ci
+npm run build
+cd ..
+# Set a long random JARVIS_ADMIN_TOKEN in the Windows user environment.
 .\scripts\start-secure.ps1
 ```
 
-Open `http://127.0.0.1:8765/dashboard`, enter the token, then click **Refresh**. Health endpoint: `http://127.0.0.1:8765/health`. The secure launcher reads the user environment token and binds to loopback. Keep the token private; do not commit it.
+Open `http://127.0.0.1:8765/dashboard`. The browser connects automatically on this laptop through a short-lived HttpOnly cookie; the admin token stays on the server. A running preview on port 8767 uses `scripts/start-preview.ps1` and a separate database. On a fresh database, no agents are active until selected in **Agents**. Existing databases with tasks preserve the original Rosie, Benson, and Mr. Belvedere templates.
 
-For Linux/macOS baseline startup, see `docs/SETUP.md` and `scripts/run-gateway.sh`. The authenticated control plane requires `JARVIS_ADMIN_TOKEN` in the server environment.
+The current selected Ollama model is `tool-star-qwen:3b`. Keep the model the user selected. On Skynet, set `OLLAMA_MODELS=E:\models` in the Ollama process environment and bind it to `127.0.0.1:11434`. `scripts/start-ollama-local.ps1` checks for an existing listener and does not replace one silently. `JARVIS_OLLAMA_URL` optionally points all gateway components at another loopback Ollama instance.
 
-## Current API
+## Connections and permissions
 
-| Endpoint | Purpose |
-| --- | --- |
-| `GET /health` | Service health |
-| `GET /dashboard` | Browser dashboard |
-| `GET /control/agents` | Rosie, Benson, Mr. Belvedere |
-| `POST /control/jobs` | Submit `{"agent":"rosie","prompt":"..."}` |
-| `GET /control/jobs` | Recent jobs, statuses, results |
-| `POST /control/jobs/{id}/cancel` | Cancel queued or running job |
-| `GET /control/audit` | Recent audit records |
+**Connections** lists Ollama, LM Studio, llama.cpp, vLLM, OpenAI, Anthropic, Gemini, OpenRouter, Groq, Mistral, xAI and a custom local OpenAI-compatible API. A successful connection fetches available models. The selected connected model can receive a prompt through `/control/providers/{provider}/chat`. API keys stay only in gateway process memory, are cleared from the browser form after connection, and are lost on restart. Hosted API endpoints are fixed; local endpoints must use loopback. Provider calls use the provider's API and may incur its charges.
 
-All `/control/*` operations require the `X-Jarvis-Token` header. Other Ollama proxy endpoints may have a different authentication policy and must not be exposed to untrusted networks.
+Local MCP Streamable HTTP servers can be connected from **Connections**. Their tool schemas are shown before use. Each exact tool call requires a one-use approval and is audited. MCP server connections and pending approvals are process-memory state and disappear on restart. Do not treat remote or untrusted MCP servers as supported by this local-only connection flow.
 
-## Tests
+The supervised Ollama runtime can list and read allowlisted source files in the approved repository after a session approval. Codex CLI and Claude Code are detected but disabled; inherited tool permissions have not been vetted. The current runtime does not provide unrestricted desktop control, shell execution, browser automation or extension automation.
+
+## Verification
 
 ```powershell
-.\.venv\Scripts\python.exe .\tests_control.py
-.\scripts\smoke.ps1
-.\scripts\cancel_acceptance.ps1
-.\scripts\gpu_cancel_probe.ps1
+.\.venv\Scripts\python.exe scripts\test_all.py
+cd frontend
+npm run build
+npm test
+cd ..
+.\scripts\acceptance.ps1 -Base http://127.0.0.1:8767
 ```
 
-Browser tests use Playwright and a separately installed Chromium browser: `scripts/browser_acceptance.py` and `scripts/browser_cancel.py`. See `docs/COMMAND_CENTER.md` for scope, limitations, and verification notes.
+Tests use isolated databases and credentials. `ASTRA_ACCEPTANCE.md` records the latest observed results and remaining limits. A running dashboard does not by itself prove provider credentials or remote Android access.
 
-## Security and limitations
+## Android HTTPS
 
-- Loopback binding only. Never expose port 8765 publicly without an independent security review.
-- Jobs, outputs, and audit history persist in `data/jarvis.db`; the entire `data/` directory is ignored by git.
-- Streaming cancellation is cooperative: cancellation status is persisted and checked between Ollama chunks. Immediate GPU process termination has **not** been conclusively proven.
-- A prior probe observed GPU utilization fall from 78% to 1% five seconds after cancellation, while VRAM remained around 2.95 GiB and the model stayed loaded. This is not a VRAM-release claim.
-- Current dashboard is a minimal HTML implementation. A full responsive GUI, accessibility improvements, typed API, and richer lifecycle tests remain planned.
-- Do not treat named personas as authorized shell/file-system automation agents.
-
-## Architecture and next steps
-
-See `docs/COMMAND_CENTER.md` for the technical status, acceptance evidence, and prioritized GUI roadmap. Source: `src/gateway.py`, `src/control.py`, `src/worker.py`, `src/dashboard.html`.
+Tailscale must be installed and connected on both devices. On Skynet, private Serve is configured at `https://skynet.tail01ff2d.ts.net`, proxying to port 8767. The preview launcher sets the Tailscale node owner as the only accepted remote browser identity; Jarvis checks Serve's `Tailscale-User-Login` header for a tailnet client and issues a secure browser cookie. The HTTPS browser flow passed from the laptop. Open that URL on Android while signed into the same tailnet to complete phone verification. Do not expose the gateway through Funnel or a public reverse proxy.
