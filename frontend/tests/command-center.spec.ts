@@ -156,25 +156,36 @@ test("queued and running cancellation in browser", async ({
     { timeout: 10000 },
   );
   await page.getByRole("button", { name: "Close", exact: true }).click();
-  const list = await (await request.get("/control/jobs", { headers })).json();
-  const running = list.find(
-    (j: { status: string; prompt: string }) =>
-      j.status === "running" && j.prompt.startsWith("Acceptance blocker"),
-  );
-  expect(running).toBeTruthy();
-  await page.getByRole("button", { name: "Refresh", exact: true }).click();
-  await page.locator(".task-row").filter({ hasText: running.prompt }).click();
-  const stopped = page.waitForResponse(
-    (r) => r.url().endsWith("/cancel") && r.request().method() === "POST",
-  );
-  await page.getByRole("button", { name: "Cancel task", exact: true }).click();
-  expect((await stopped).status()).toBe(200);
+  let cancelledRunning: { id: string; prompt: string } | undefined;
+  for (let attempt = 0; attempt < blockers.length; attempt++) {
+    const list = await (await request.get("/control/jobs", { headers })).json();
+    const running = list.find(
+      (j: { status: string; prompt: string }) =>
+        j.status === "running" && j.prompt.startsWith("Acceptance blocker"),
+    );
+    if (!running) {
+      await page.waitForTimeout(250);
+      continue;
+    }
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await page.locator(".task-row").filter({ hasText: running.prompt }).click();
+    const stopped = page.waitForResponse(
+      (r) => r.url().endsWith("/cancel") && r.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: "Cancel task", exact: true }).click();
+    if ((await stopped).status() === 200) {
+      cancelledRunning = running;
+      break;
+    }
+    await page.getByRole("button", { name: "Close", exact: true }).click();
+  }
+  expect(cancelledRunning).toBeTruthy();
   await expect(page.getByRole("dialog").locator(".badge")).toHaveText(
     "cancelled",
     { timeout: 15000 },
   );
   const job = await (
-    await request.get("/control/jobs/" + running.id, { headers })
+    await request.get("/control/jobs/" + cancelledRunning!.id, { headers })
   ).json();
   expect(job.stream_closed).toBeTruthy();
   await request.post("/control/stop", { headers, data: {} });

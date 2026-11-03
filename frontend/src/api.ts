@@ -26,6 +26,24 @@ export interface Event {
   action: string;
   details: string;
 }
+export interface AutomationHealth {
+  available: boolean;
+  actions: string[];
+  reason?: string;
+}
+export interface AutomationRequest {
+  id: string;
+  category: "windows" | "browser";
+  action: string;
+  arguments: Record<string, unknown>;
+  risk: "low" | "medium" | "high";
+  digest: string;
+  status: string;
+  created: string;
+  expires: number;
+  result?: unknown;
+  error?: string;
+}
 export interface Summary {
   counts: Partial<Record<Status, number>>;
   event_id: number;

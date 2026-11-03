@@ -12,4 +12,11 @@ if (Test-Path -LiteralPath $ts) {
  }
 }
 Set-Location $root
-& (Join-Path $root '.venv\Scripts\python.exe') -m uvicorn gateway:app --app-dir src --host 127.0.0.1 --port 8767 --log-level warning
+$adapter = . (Join-Path $PSScriptRoot 'start-automation-adapter.ps1') -Port 18797 -Roots @($root)
+try {
+ & (Join-Path $root '.venv\Scripts\python.exe') -m uvicorn gateway:app --app-dir src --host 127.0.0.1 --port 8767 --log-level warning
+} finally {
+ if ($adapter -and (Get-Process -Id $adapter.ProcessId -ErrorAction SilentlyContinue)) {
+  Stop-Process -Id $adapter.ProcessId
+ }
+}

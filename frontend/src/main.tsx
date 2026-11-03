@@ -35,6 +35,8 @@ import {
   type Summary,
   type Models,
   type Telemetry,
+  type AutomationHealth,
+  type AutomationRequest,
 } from "./api";
 import "./style.css";
 const pages = [
@@ -44,6 +46,7 @@ const pages = [
   "Activity",
   "Models",
   "Connections",
+  "Automation",
   "Security",
   "Settings",
 ] as const;
@@ -55,6 +58,7 @@ const icons = [
   Activity,
   Boxes,
   Plug,
+  Command,
   Shield,
   Settings,
 ];
@@ -154,7 +158,7 @@ const helpTopics = [
   ],
   [
     "Can I use my Android phone?",
-    "Use your laptop’s private Tailscale HTTPS address while Tailscale is connected on both devices. The laptop must stay awake and online. Remote access remains unverified until tested from cellular data.",
+    "Use your laptop’s private Tailscale HTTPS address while Tailscale is connected on both devices. The laptop must stay awake and online. The Android dashboard and task flow have been verified.",
   ],
   [
     "Why is my connection offline?",
@@ -195,6 +199,11 @@ function App() {
     [gpu, setGpu] = useState<Telemetry | null>(null);
   const [runtimes, setRuntimes] = useState<Runtime[]>([]),
     [sessions, setSessions] = useState<Session[]>([]);
+  const [automationHealth,setAutomationHealth]=useState<AutomationHealth | null>(null),
+    [automationRequests,setAutomationRequests]=useState<AutomationRequest[]>([]),
+    [automationCategory,setAutomationCategory]=useState<"windows"|"browser">("windows"),
+    [automationAction,setAutomationAction]=useState("list_processes"),
+    [automationArguments,setAutomationArguments]=useState("{}");
   const [providers,setProviders]=useState<Provider[]>([]),
     [providerId,setProviderId]=useState("ollama"),
     [providerEndpoint,setProviderEndpoint]=useState(""),
@@ -268,7 +277,7 @@ function App() {
       if (!key || loading.current) return;
       loading.current = true;
       try {
-        const [j, a, e, s, m, g, r, se] = await Promise.all([
+        const [j, a, e, s, m, g, r, se, ah, ar] = await Promise.all([
           api<Job[]>(
             key,
             "jobs?limit=50&offset=" +
@@ -285,6 +294,8 @@ function App() {
           api<Telemetry>(key, "telemetry"),
           api<Runtime[]>(key, "runtimes"),
           api<Session[]>(key, "sessions"),
+          api<AutomationHealth>(key, "automation/health"),
+          api<AutomationRequest[]>(key, "automation/requests"),
         ]);
         setJobs(j);
         setAgents(a);
@@ -294,6 +305,8 @@ function App() {
         setGpu(g);
         setRuntimes(r);
         setSessions(se);
+        setAutomationHealth(ah);
+        setAutomationRequests(ar);
         setConnected(true);
         setLastSync(new Date().toLocaleTimeString());
         setError("");
@@ -381,7 +394,8 @@ function App() {
   }
   const counts = summary?.counts || {},
     active = (counts.running || 0) + (counts.cancelling || 0),
-    pending = sessions.filter((s) => s.status === "awaiting_approval");
+    pending = sessions.filter((s) => s.status === "awaiting_approval"),
+    automationPending = automationRequests.filter((r) => r.status === "awaiting_approval");
   const taskList = (
     <>
       <div className="tools">
@@ -501,8 +515,8 @@ function App() {
               >
                 <Icon size={18} />
                 {p}
-                {p === "Security" && pending.length > 0 && (
-                  <span className="nav-count">{pending.length}</span>
+                {p === "Security" && pending.length + automationPending.length > 0 && (
+                  <span className="nav-count">{pending.length + automationPending.length}</span>
                 )}
               </button>
             );
@@ -577,6 +591,7 @@ function App() {
                         Activity: "A traceable record of what happened.",
                         Models: "Local intelligence, real availability.",
                         Connections: "Connect runtimes. Keep control.",
+                        Automation: "Request one exact action at a time.",
                         Security: "Explicit permissions. Visible decisions.",
                         Settings: "Make the workspace yours.",
                       } as Record<string, string>
@@ -853,6 +868,7 @@ function App() {
           )}
           {page === "Connections" && (
             <>
+              <section className="panel"><Command className="accent"/><h2>Automation adapter</h2><span className={"badge "+(automationHealth?.available?"completed":"failed")}>{automationHealth?.available?"Connected · approval required":"Unavailable"}</span><p>{automationHealth?.available?automationHealth.actions.length+" safe actions available":automationHealth?.reason||"Connect to verify"}</p><button onClick={()=>setPage("Automation")} disabled={!automationHealth?.available}>Request an action</button></section>
               <section className="panel">
                 <h2>MCP tools</h2>
                 <p className="muted">Connect a local MCP HTTP server, inspect its tools, then approve each call.</p>
@@ -926,7 +942,7 @@ function App() {
                 <section className="panel">
                   <Smartphone className="accent" />
                   <h2>Android / HTTPS</h2>
-                  <span className="badge">Connection not verified</span>
+                  <span className="badge completed">Android verified</span>
                   <p>
                     Use private Tailscale Serve. Keep the laptop online and
                     connect your Android phone to the same private network.
@@ -1028,6 +1044,28 @@ function App() {
               </section>
             </>
           )}
+          {page === "Automation" && (
+            <>
+              <section className="panel">
+                <h2>Request an approved action</h2>
+                <p className="muted">Each exact action expires after five minutes and can be approved only once.</p>
+                <form className="stack" onSubmit={(e)=>{e.preventDefault();void action(async()=>{
+                  const parsed=JSON.parse(automationArguments) as Record<string,unknown>;
+                  if(!parsed||Array.isArray(parsed)||typeof parsed!=="object") throw Error("Arguments must be a JSON object");
+                  await api(token,"automation/requests",{category:automationCategory,action:automationAction,arguments:parsed});
+                  setAutomationArguments("{}");setPage("Security");
+                });}}>
+                  <label>Category<select value={automationCategory} onChange={(e)=>{const category=e.target.value as "windows"|"browser";setAutomationCategory(category);setAutomationAction(category==="windows"?"list_processes":"browser_create");}}><option value="windows">Windows</option><option value="browser">Browser</option></select></label>
+                  <label>Action<select value={automationAction} onChange={(e)=>setAutomationAction(e.target.value)}>
+                    {(automationCategory==="windows"?["list_files","file_metadata","read_text","list_processes","start_process","stop_process"]:["browser_create","browser_close","browser_navigate","browser_snapshot","browser_click","browser_fill","browser_screenshot"]).map((name)=><option key={name}>{name}</option>)}
+                  </select></label>
+                  <label>Exact arguments (JSON)<textarea aria-label="Exact automation arguments" value={automationArguments} onChange={(e)=>setAutomationArguments(e.target.value)} required/></label>
+                  <button className="primary" disabled={busy||!automationHealth?.available}>Create approval request</button>
+                </form>
+              </section>
+              <section className="panel"><h2>Automation tasks</h2>{automationRequests.length?automationRequests.map((r)=><article className="session" key={r.id}><span className={"badge "+r.status}>{r.status}</span><strong>{r.category} · {r.action}</strong><pre>{JSON.stringify(r.arguments,null,2)}</pre>{r.result!==null&&r.result!==undefined&&<pre>{JSON.stringify(r.result,null,2)}</pre>}{r.error&&<p className="error">{r.error}</p>}{["awaiting_approval","approved"].includes(r.status)&&<button onClick={()=>void action(()=>api(token,"automation/requests/"+r.id+"/cancel",{}))}>Cancel</button>}</article>):<div className="empty">No automation requests yet.</div>}</section>
+            </>
+          )}
           {page === "Security" && (
             <>
               <div className="cards">
@@ -1054,6 +1092,10 @@ function App() {
                   </p>
                 </section>
               </div>
+              <section className="panel">
+                <h2>Automation approvals</h2>
+                {automationPending.length?automationPending.map((r)=><article className="session" key={r.id}><span className="eyebrow">{r.category} · {r.risk.toUpperCase()} RISK</span><h3>{r.action}</h3><pre>{JSON.stringify(r.arguments,null,2)}</pre><small>Expires {new Date(r.expires*1000).toLocaleString()} · digest {r.digest.slice(0,12)}…</small><div className="tools"><button className="primary" disabled={busy} onClick={()=>void action(()=>api(token,"automation/requests/"+r.id+"/approve",{}))}>Approve once</button><button disabled={busy} onClick={()=>void action(()=>api(token,"automation/requests/"+r.id+"/reject",{}))}>Reject</button></div></article>):<div className="empty">No automation decisions waiting.</div>}
+              </section>
               <section className="panel">
                 <h2>Awaiting your approval</h2>
                 {pending.length ? (

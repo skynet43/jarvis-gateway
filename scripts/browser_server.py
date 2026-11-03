@@ -1,12 +1,35 @@
 """Isolated acceptance server; never uses the user's database or admin token."""
-import os,sys,tempfile
+import os, secrets, sys, tempfile, threading, time
 from pathlib import Path
-sys.path.insert(0,str(Path(__file__).resolve().parent.parent/'src'))
+root=Path(__file__).resolve().parent.parent
+sys.path[:0]=[str(root),str(root/'src')]
 if not os.environ.get('JARVIS_ACCEPTANCE_TOKEN'):
  raise SystemExit('Acceptance token must be supplied by the test runner')
 os.environ['JARVIS_ADMIN_TOKEN']=os.environ['JARVIS_ACCEPTANCE_TOKEN']
 os.environ['JARVIS_TEST_TEMPLATES']='1'
 with tempfile.TemporaryDirectory(prefix='jarvis-browser-') as directory:
  os.environ['JARVIS_DB']=str(Path(directory)/'test.db')
+ os.environ['JARVIS_AUTOMATION_SECRET']=secrets.token_urlsafe(32)
+ os.environ['JARVIS_AUTOMATION_URL']='http://127.0.0.1:18803/mcp'
  import uvicorn
- uvicorn.run('gateway:app',host='127.0.0.1',port=8766,log_level='warning')
+ from adapter.automation_adapter import build_app
+ from adapter.browser_tools import BrowserTools
+ from adapter.windows_tools import WindowsTools
+ browser=BrowserTools(Path(directory)/'screenshots',{'127.0.0.1'})
+ windows=WindowsTools([Path(directory)],[Path(sys.executable).resolve()])
+ adapter=uvicorn.Server(uvicorn.Config(
+  build_app(windows,os.environ['JARVIS_AUTOMATION_SECRET'],browser),
+  host='127.0.0.1',port=18803,log_level='error'))
+ thread=threading.Thread(target=adapter.run,daemon=True)
+ thread.start()
+ for _ in range(50):
+  if adapter.started:break
+  time.sleep(.1)
+ if not adapter.started:raise SystemExit('Automation adapter did not start')
+ try:
+  uvicorn.run('gateway:app',host='127.0.0.1',port=8766,log_level='warning')
+ finally:
+  adapter.should_exit=True
+  thread.join(timeout=5)
+  browser.close()
+  windows.close()

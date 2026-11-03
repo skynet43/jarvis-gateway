@@ -26,7 +26,15 @@ The current selected Ollama model is `tool-star-qwen:3b`. Keep the model the use
 
 Local MCP Streamable HTTP servers can be connected from **Connections**. Their tool schemas are shown before use. Each exact tool call requires a one-use approval and is audited. MCP server connections and pending approvals are process-memory state and disappear on restart. Do not treat remote or untrusted MCP servers as supported by this local-only connection flow.
 
-The supervised Ollama runtime can list and read allowlisted source files in the approved repository after a session approval. Codex CLI and Claude Code are detected but disabled; inherited tool permissions have not been vetted. The current runtime does not provide unrestricted desktop control, shell execution, browser automation or extension automation.
+The supervised Ollama runtime can list and read allowlisted source files in the approved repository after a session approval. Codex CLI and Claude Code are detected but disabled; inherited tool permissions have not been vetted.
+
+## Approval-required automation
+
+Jarvis starts a separate loopback MCP adapter for restricted Windows and browser actions. Open **Automation** to request one exact action, then review its category, arguments, risk, expiration and digest under **Security**. Approval is single-use and expires after five minutes.
+
+Windows actions can inspect allowlisted files, list processes, start explicitly allowlisted executables with argument arrays, and stop only processes created by the current adapter session. Browser actions use an isolated Playwright context and configured host allowlist for navigation, snapshots, constrained clicks, non-sensitive text entry and screenshots.
+
+Arbitrary shell commands, file mutation, registry/service/task changes, elevation, credential or payment entry, uploads, downloads, extensions and the normal browser profile remain blocked. Emergency Stop cancels pending automation and requests cancellation of active work. The adapter binds only to loopback and uses an ephemeral startup secret that is not persisted or sent to the browser.
 
 ## Verification
 

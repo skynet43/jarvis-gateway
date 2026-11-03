@@ -20,4 +20,11 @@ if ($env:JARVIS_HTTPS_ORIGIN -and (Test-Path -LiteralPath $ts)) {
   $env:JARVIS_TAILSCALE_LOGIN=$tailnet.User.($tailnet.Self.UserID).LoginName
  }
 }
-& (Join-Path $root '.venv\Scripts\python.exe') (Join-Path $root 'src\gateway.py')
+$adapter = . (Join-Path $PSScriptRoot 'start-automation-adapter.ps1') -Port 18798 -Roots @($root)
+try {
+ & (Join-Path $root '.venv\Scripts\python.exe') (Join-Path $root 'src\gateway.py')
+} finally {
+ if ($adapter -and (Get-Process -Id $adapter.ProcessId -ErrorAction SilentlyContinue)) {
+  Stop-Process -Id $adapter.ProcessId
+ }
+}
