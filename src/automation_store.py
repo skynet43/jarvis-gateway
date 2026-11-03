@@ -32,6 +32,8 @@ def _row(row):
         raise KeyError("Automation request not found")
     data = dict(row)
     data["arguments"] = json.loads(data["arguments"])
+    if data["result"] is not None:
+        data["result"] = json.loads(data["result"])
     return data
 
 
@@ -147,3 +149,15 @@ def expire(*, clock=time.time):
                        (now(), request_id))
             _event(db, request_id, "expired")
         return len(ids)
+
+
+def cancel_all(db):
+    init(db)
+    ids = [row[0] for row in db.execute(
+        "SELECT id FROM automation_requests WHERE status IN ('awaiting_approval','approved')"
+    )]
+    for request_id in ids:
+        db.execute("UPDATE automation_requests SET status='cancelled',updated=? WHERE id=?",
+                   (now(), request_id))
+        _event(db, request_id, "cancelled", {"emergency_stop": True})
+    return ids

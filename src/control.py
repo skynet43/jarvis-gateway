@@ -144,7 +144,9 @@ def stop_all():
         for sid in runtime_ids:
             db.execute("UPDATE sessions SET status=CASE WHEN status='running' THEN 'cancelling' ELSE 'cancelled' END,updated=? WHERE id=?",(now(),sid))
             event(db,sid,"cancel_requested",{})
-        return {"requested":len(ids)+len(runtime_ids),"persona_tasks":len(ids),"runtime_sessions":len(runtime_ids),"scope":"All gateway tasks and runtime sessions; no model unload or system shutdown"}
+        from automation_store import cancel_all
+        automation_ids=cancel_all(db)
+        return {"requested":len(ids)+len(runtime_ids)+len(automation_ids),"persona_tasks":len(ids),"runtime_sessions":len(runtime_ids),"automation_requests":len(automation_ids),"scope":"All gateway tasks, runtime sessions, and automation requests; no model unload or system shutdown"}
 @router.get("/audit")
 def audit_events(after: int = Query(0,ge=0), limit: int = Query(100,ge=1,le=500)):
     with LOCK, connect() as db:

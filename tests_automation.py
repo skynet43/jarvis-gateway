@@ -118,7 +118,7 @@ class AutomationApiTests(unittest.TestCase):
         self.app.dependency_overrides.clear()
         self.temp.cleanup()
 
-    def test_request_review_approval_and_replay(self):
+    def test_request_review_rejection_and_cancellation(self):
         created = self.client.post("/control/automation/requests", json={
             "category": "windows", "action": "list_processes",
             "arguments": {"limit": 20},
@@ -128,12 +128,23 @@ class AutomationApiTests(unittest.TestCase):
         detail = self.client.get("/control/automation/requests/" + request_id)
         self.assertEqual(detail.json()["arguments"], {"limit": 20})
         self.assertEqual(len(self.client.get("/control/automation/requests").json()), 1)
-        approved = self.client.post("/control/automation/requests/" + request_id + "/approve")
-        self.assertEqual(approved.json()["status"], "approved")
-        self.assertEqual(
-            self.client.post("/control/automation/requests/" + request_id + "/approve").status_code,
-            409,
-        )
+        rejected = self.client.post("/control/automation/requests/" + request_id + "/reject")
+        self.assertEqual(rejected.json()["status"], "rejected")
+        second = self.client.post("/control/automation/requests", json={
+            "category": "windows", "action": "list_processes", "arguments": {},
+        }).json()
+        cancelled = self.client.post("/control/automation/requests/" + second["id"] + "/cancel")
+        self.assertEqual(cancelled.json()["status"], "cancelled")
+
+    def test_emergency_stop_cancels_pending_automation(self):
+        created = self.client.post("/control/automation/requests", json={
+            "category": "windows", "action": "list_processes", "arguments": {},
+        }).json()
+        stopped = self.client.post("/control/stop")
+        self.assertEqual(stopped.status_code, 200, stopped.text)
+        self.assertEqual(stopped.json()["automation_requests"], 1)
+        detail = self.client.get("/control/automation/requests/" + created["id"]).json()
+        self.assertEqual(detail["status"], "cancelled")
 
 
 if __name__ == "__main__":
